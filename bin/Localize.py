@@ -99,6 +99,7 @@ if __name__ == '__main__':
     # TODO make a wifi signal object with id and strength
     
     print "running query: SELECT access_points FROM table WHERE phone_id = table.phone_id and timestamp = latest "
+
     # TODO implement "timestamp = latest" in the sql query
     # TODO consider merging all the SQL queries into a single querey, to improve performance
     
@@ -110,22 +111,11 @@ if __name__ == '__main__':
     u_clause = [u_clause]
     for (ap,ss)  in wifi_data:
         radius = radius_from_access_strength(ap,ss)
-        #(x0, y0) = access_point_to_coord_mapping[ap]
-        #print x0
         u_clause.append((x - access_point_to_coord_mapping[ap][0])**2 + (y - access_point_to_coord_mapping[ap][1])**2 <= radius_from_access_strength(ap,ss)**2)
-        #s.add((x - access_point_to_coord_mapping[ap][0])**2 + (y - access_point_to_coord_mapping[ap][1])**2 <= radius_from_access_strength(ap,ss)**2 )
-        #if ((ap,ss) != wifi_data[-1]):
-            #wifi_clauses += " AND "
+
     u_clause = And(u_clause)
-    #print u_clause
-    #print "WiFi clauses:" , wifi_clauses
     
     print "Building SMT formula"
-    
-
-    #smt_formula = u_clause + wifi_clauses
-    #print u_clause
-    #print "Sending to SMT solver:", smt_formula
     
     #TODO actually call the SMT solver
     print "Calling SMT solver ..."
@@ -136,11 +126,13 @@ if __name__ == '__main__':
     #TODO replace hardcoded results with SMT call
     
     print "SMT solver returns" , s.model()
+    print "---------------------------------------------------------------------"
 
     # ------------------------------------------------------------------
     # Determine a circle which captures all possible value of location
+    # ------------------------------------------------------------------
+    
     r = 1
-    #print s
     new_x = s.model()[x]
     new_y = s.model()[y]
     
@@ -148,7 +140,6 @@ if __name__ == '__main__':
     s.add((x - new_x)**2 + (y - new_y)**2 >= r**2 )
     
     while (s.check() == sat):
-        print "SMT solver returns" , s.model(), "r =",r
         r = r * 2
         s.pop()
         s.push()
@@ -156,22 +147,20 @@ if __name__ == '__main__':
     
     s.pop()
     range_list = [r/2, r]
-    print range_list
     while(range_list[1] - range_list[0] > 0.1):
         s.push()
         s.add((x - new_x)**2 + (y - new_y)**2 >= ((range_list[1] - range_list[0])/2 + range_list[0])**2 )
         if (s.check() == sat):
-            print "SMT solver returns" , s.model(), "r =", range_list
             range_list[0] = (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]
         else:
             range_list[1] = (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]
         s.pop()
     print "Outter circle at point [", new_x, ", ", new_y, "] has radius: ", range_list[1]
+    print "---------------------------------------------------------------------"
 
     # -------------------------------------------------------------------
     # ---------------------Determine inner circle------------------------
 
-    #print u_clause
     s.reset()
     s.add(Not(u_clause))
 
@@ -183,13 +172,10 @@ if __name__ == '__main__':
     s.add((x - new_x)**2 + (y - new_y)**2 <= r**2 )
     
     while (s.check() == unsat):
-        #print "SMT solver returns" , s.model(), "r =",r
         r = r * 2
-        #print r
         s.pop()
         s.push()
         s.add((x - new_x)**2 + (y - new_y)**2 <= r**2 )
-    
     s.pop()
     range_list = [float(r)/2, r]
     while(range_list[1] - range_list[0] > 1):
@@ -201,24 +187,22 @@ if __name__ == '__main__':
             range_list[1] = (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]
         s.pop()
     print "Inner circle at point [", new_x, ", ", new_y, "] has radius: ", range_list[0]
+    print "---------------------------------------------------------------------"
 
-    # --------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------------
     # ---------------------Fill up the whole region with square------------------------
-    # --------------------------------with maximum side-------------------------------
+    # --------------------------------with minimum side 0.5----------------------------
 
     s.reset()
-    clause = (x**2 + y**2) <= 4
-    s.add(clause)
+    clause = (x**2 + y**2) <= 4 # I am assuming for this case the region is a circle with
+    s.add(clause)               # radius 2. There is some corner cases that we should handle
     square_list = []
     while(s.check() == sat):
-        print "a"
         new_x = s.model()[x]
         new_y = s.model()[y]
-        print s.model()
         distance = 0.25
         s.reset()
         s.add(Not(clause))
-        print s
         s.push()
         s.add(x <= (new_x + distance), x >= (new_x - distance), y <= (new_y + distance), y >= (new_y - distance))
         while(s.check() == unsat):
@@ -228,8 +212,7 @@ if __name__ == '__main__':
             s.add(x <= (new_x + distance), x >= (new_x - distance), y <= (new_y + distance), y >= (new_y - distance))
         s.pop()
         range_list = [float(distance)/2, distance]
-        print range_list
-        while(range_list[1] - range_list[0] > 0.1):
+        while(range_list[1] - range_list[0] > 0.1): # parameterizable
             s.push()
             s.add(x <= (new_x + (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]), x >= (new_x - (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]), y <= (new_y + (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]), y >= (new_y - (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]))
             if (s.check() == unsat):
@@ -237,11 +220,13 @@ if __name__ == '__main__':
             else:
                 range_list[1] = (float(range_list[1]) - float(range_list[0]))/2 + range_list[0]
             s.pop()
-        square_list.extend([x <= (new_x + range_list[1]), x >= (new_x - range_list[1]), y <= (new_y + range_list[1]), y >= (new_y - range_list[1])])                
+        square_list.append(And(x <= (new_x + range_list[1]), x >= (new_x - range_list[1]), y <= (new_y + range_list[1]), y >= (new_y - range_list[1])))                
         s.reset()
         s.add(clause)
         s.add(Not(Or(square_list)))
-    print square_list
+        
+    print "List of square regions that fill up the whole possible region is: "
+    print square_list # It can be changed to properly output to a display interface
     
     # we could start by looking up this first satisfiable point,
     # or we can resample. # We have a bunch of options here, but for this,
